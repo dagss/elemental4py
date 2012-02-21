@@ -1,0 +1,107 @@
+/*
+Routines for doing run-time dispatching rather than compile-time
+template resolution of Elemental operations. This instantiates
+a large set of the available templates and makes them available
+through run-time mechanisms.
+*/
+
+{{py:
+DTYPES = {
+#  'SINGLE' : 'float',
+#  'SINGLE_COMPLEX' : 'std::complex<float>',
+  'DOUBLE' : 'double',
+#  'DOUBLE_COMPLEX' : 'std::complex<double>'
+}
+
+implementations = '''\
+mc_mr.hpp
+mc_star.hpp
+md_star.hpp
+mr_mc.hpp
+mr_star.hpp
+star_mc.hpp
+star_md.hpp
+star_mr.hpp
+star_star.hpp
+star_vc.hpp
+star_vr.hpp
+vc_star.hpp
+vr_star.hpp'''
+
+DISTRIBUTIONS = []
+for line in implementations.split('\n'):
+    line = line.strip()[:-4]
+    col, row = line.split('_')    
+    DISTRIBUTIONS.append((col.upper(), row.upper()))
+}}
+
+
+#include "polymorphic_elemental.hpp"
+#include "elemental.hpp"
+
+using namespace elemental;
+
+namespace elemental {
+namespace runtime {
+
+template <typename T, typename Int>
+class RuntimeDistMatrixImpl : public RuntimeDistMatrix {
+public:
+  const AbstractDistMatrix<T, Int> *matrix_;
+
+  RuntimeDistMatrixImpl(AbstractDistMatrix<T, Int> *matrix,
+                        DataType dtype,
+                        Distribution colDist,
+                        Distribution rowDist) :
+    RuntimeDistMatrix(dtype, colDist, rowDist),
+    matrix_(matrix) {
+  }
+
+  virtual ~RuntimeDistMatrixImpl() {
+    delete matrix_;
+  }
+
+};
+
+
+RuntimeDistMatrix* CreateDistMatrix(DataType dtype,
+                                    Distribution colDist,
+                                    Distribution rowDist,
+                                    int height,
+                                    int width) {
+  {{for DTYPE_ENUM, DTYPE_T in DTYPES.items()}}
+  if (dtype == {{DTYPE_ENUM}}) {
+    AbstractDistMatrix<{{DTYPE_T}}, int> *dist_matrix;
+    if (0) {}
+    {{for COLDIST, ROWDIST in DISTRIBUTIONS}}
+    else if (colDist == {{COLDIST}} && rowDist == {{ROWDIST}}) {
+      dist_matrix = new DistMatrix<{{DTYPE_T}},
+        {{COLDIST}}, {{ROWDIST}}, int>(height, width);
+    }
+    {{endfor}}
+    else {
+      throw std::logic_error("colDist/rowDist combination not implemented");
+    }
+
+    return new RuntimeDistMatrixImpl<{{DTYPE_T}}, int>(dist_matrix, dtype, colDist, rowDist);
+  }
+  {{endfor}}
+  throw std::logic_error("dtype not supported");
+}
+
+
+void Gemm(double alpha,
+          RuntimeDistMatrix *A,
+          RuntimeDistMatrix *B,
+          double beta,
+          RuntimeDistMatrix *C) {
+  if (!(A->dtype == B->dtype  && B->dtype == C->dtype)) {
+    throw std::logic_error("mismatching dtypes");
+  }
+  
+}
+
+
+
+}
+}
