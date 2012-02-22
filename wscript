@@ -28,6 +28,7 @@ def configure(conf):
     conf.add_os_flags('LINKFLAGS')
     conf.add_os_flags('CYTHONFLAGS')
     conf.add_os_flags('CXX')
+    conf.add_os_flags('CXXFLAGS')
 
     conf.load('compiler_c')
     conf.load('compiler_cxx')

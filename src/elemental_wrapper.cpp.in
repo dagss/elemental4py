@@ -5,6 +5,10 @@ a large set of the available templates and makes them available
 through run-time mechanisms.
 */
 
+/*
+Templating support code
+*/
+
 {{py:
 ALL_DISTRIBUTIONS = [
     ('MC', 'MR'),
@@ -24,39 +28,115 @@ class Context:
         self.dtype_t = dtype_t
         self.coldist = coldist
         self.rowdist = rowdist
-        self.dist = '%s,%s' % (coldist, rowdist)
-        self.matrix_t = 'DistMatrix<%s, %s, %s, int> ' % (dtype_t, coldist, rowdist)
-        self.wrapper_t = 'MatrixWrapper<%s> ' % dtype_t
+        if coldist is not None:
+            assert rowdist is not None
+            self.dist = '%s,%s' % (coldist, rowdist)
+            self.matrix_t = 'DistMatrix<%s, %s, %s, int> ' % (dtype_t, coldist, rowdist)
+        else:
+            # coldist/rowdist is None, use AbstractDistMatrix
+            self.matrix_t = 'AbstractDistMatrix<%s, int> ' % dtype_t
 
     def scalar(self, expr):
         if self.dtype_t.startswith('Complex'):
-            return '(%s(creal(%s), cimag(%s)))' % (self.dtype_t, expr, expr)
+            return '(%s((%s).real, (%s).imag))' % (self.dtype_t, expr, expr)
         else:
-            return '((%s)creal(%s))' % (self.dtype_t, expr)
+            return '((%s)(%s).real)' % (self.dtype_t, expr)
     
     def matrix(self, wrapper_expr):
-        return '(*((%s*)((%s*)(%s))->wrapped))' % (self.matrix_t, self.wrapper_t, wrapper_expr)
+        return '(*((%s*)(%s)->cpp_obj))' % (self.matrix_t, wrapper_expr)
 }}
 
+{{def generic_dispatch(body, distributions, dtype_expr, coldist_expr, rowdist_expr, errcode)}}
+{{py:
+if isinstance(distributions, str):
+    distributions = [tuple(x.split(',')) for x in distributions.split()]
+}}
+  try {
+    if (0) {}
+
+    {{for dtype_enum, dtype_t in DTYPES.items()}}
+    else if (({{dtype_expr}}) == {{dtype_enum}}) {
+
+      {{if distributions is None}}
+      {{# use abstract superclass }}
+
+      {{py: ctx = Context(dtype_enum, dtype_t, None, None)}}
+      {{body(ctx)}}
+
+      {{else}}
+      {{# use a new if-test to statically dispatch on distribution }}
+
+      if (0) {}
+      {{for coldist, rowdist in distributions}}
+      else if (({{coldist_expr}}) == ELEM_{{coldist}} &&
+               ({{rowdist_expr}}) == ELEM_{{rowdist}}) {
+        {{py: ctx = Context(dtype_enum, dtype_t, coldist, rowdist)}}
+        {{body(ctx)}}
+      }
+      {{endfor}}
+      else {
+        throw std::logic_error("invalid colDist/rowDist combination");
+      }
+
+      {{endif}}
+
+    }
+    {{endfor}}
+    else {
+      throw std::logic_error("invalid dtype");
+    }
+    {{if errcode is not None and errcode != 'NULL'}}
+    return 0;
+    {{endif}}
+  } catch (std::exception& e) {
+    {{if errcode is not None}}
+      set_error(e.what());
+      return {{errcode}};
+    {{endif}}
+  } catch (...) {
+    {{if errcode is not None}}
+      set_error("non-std exception");
+      return {{errcode}};
+    {{endif}}
+  }
+{{enddef}}
+
+{{def dispatch(body, distributions, matrix_exprs=['matrix'], errcode='ELEM_ERROR_LOGIC')}}
+{{py:
+if isinstance(matrix_exprs, str):
+    matrix_exprs = matrix_exprs.split()
+}}
+  {{for matrix_expr in matrix_exprs[1:]}}
+  if ((({{matrix_expr}})->dtype != ({{matrix_exprs[0]}})->dtype) ||
+      (({{matrix_expr}})->col_dist != ({{matrix_exprs[0]}})->col_dist) ||
+      (({{matrix_expr}})->row_dist != ({{matrix_exprs[0]}})->row_dist)) {
+    {{if errcode is not None}}
+      set_error("dtype/col_dist/row_dist does not match up");
+      return {{errcode}};
+    {{else}}
+      return;
+    {{endif}}    
+  }
+  {{endfor}}
+  int _dtype = {{matrix_exprs[0]}}->dtype;
+  {{if distributions is not None}}
+  int _col_dist = {{matrix_exprs[0]}}->col_dist;
+  int _row_dist = {{matrix_exprs[0]}}->row_dist;
+  {{endif}}
+  {{generic_dispatch(body, distributions, '_dtype', '_col_dist', '_row_dist', errcode)}}
+{{enddef}}
+
+
+/*
+Wrapping support code, global environment
+*/
+#include <stdio.h>
 #include <string.h>
 
 #include "elemental_wrapper.h"
 #include "elemental.hpp"
 
 using namespace elem;
-
-template <typename T>
-class MatrixWrapper : public elem_matrix {
-public:
-  MatrixWrapper(int _dtype, int _col_dist, int _row_dist, AbstractDistMatrix<T> *matrix) {
-    dtype = _dtype;
-    col_dist = _col_dist;
-    row_dist = _row_dist;
-    wrapped = matrix;
-  }
-  AbstractDistMatrix<T> *wrapped;
-};
-
 
 static Orientation as_orientation(int x) {
   switch (x) {
@@ -81,72 +161,45 @@ static void set_error(const char *msg) {
 }
 
 
-{{def generic_dispatch(body, distributions, dtype_expr, coldist_expr, rowdist_expr, errcode)}}
-{{py:
-if isinstance(distributions, str):
-    distributions = [tuple(x.split(',')) for x in distributions.split()]
-}}
-  try {
-    {{for dtype_enum, dtype_t in DTYPES.items()}}
-    if (({{dtype_expr}}) == {{dtype_enum}}) {
-      if (0) {}
-      {{for coldist, rowdist in distributions}}
-      else if (({{coldist_expr}}) == ELEM_{{coldist}} &&
-               ({{rowdist_expr}}) == ELEM_{{rowdist}}) {
-        {{py:
-ctx = Context(dtype_enum, dtype_t, coldist, rowdist)
-}}
-        {{body(ctx)}}
-      }
-      {{endfor}}
-      else {
-        throw std::logic_error("invalid colDist/rowDist combination");
-      }
-    }
-    {{endfor}}
-    throw std::logic_error("invalid dtype");
-  } catch (std::exception& e) {
-    {{if errcode is not None}}
-      set_error(e.what());
-      return {{errcode}};
-    {{endif}}
-  } catch (...) {
-    {{if errcode is not None}}
-      set_error("unrecognized exception");
-      return {{errcode}};
-    {{endif}}
-  }
-{{enddef}}
 
-{{def dispatch(body, distributions, matrix_exprs=['matrix'], errcode='-1')}}
-{{py:
-if isinstance(matrix_exprs, str):
-    matrix_exprs = matrix_exprs.split()
-}}
-  {{for matrix_expr in matrix_exprs[1:]}}
-  if ((({{matrix_expr}})->dtype != ({{matrix_exprs[0]}})->dtype) ||
-      (({{matrix_expr}})->col_dist != ({{matrix_exprs[0]}})->col_dist) ||
-      (({{matrix_expr}})->row_dist != ({{matrix_exprs[0]}})->row_dist)) {
-    {{if errcode is not None}}
-      set_error("dtype/col_dist/row_dist does not match up");
-      return {{errcode}};
-    {{else}}
-      return;
-    {{endif}}    
+
+/* 
+  Global
+*/
+char *elem_errmsg() {
+  return _errmsg;
+}
+
+int elem_initialize(int* argc, char **argv) {
+  try {
+    Initialize(*argc, argv);
+    return 0;
+  } catch (std::exception &e) {
+    set_error(e.what());
+    return NULL;
+  } catch (...) {
+    set_error("non-std exception");
+    return NULL;
   }
-  {{endfor}}
-  int _dtype = {{matrix_exprs[0]}}->dtype;
-  int _col_dist = {{matrix_exprs[0]}}->col_dist;
-  int _row_dist = {{matrix_exprs[0]}}->row_dist;
-  {{generic_dispatch(body, distributions, '_dtype', '_col_dist', '_row_dist', errcode)}}
-{{enddef}}
+}
+
+void elem_finalize() {
+  try {
+    Finalize();
+  } catch (...) {
+    return;
+  }
+}
+
+/*
+  DistMatrix and matrix operations
+*/
 
 elem_matrix *elem_create_matrix(int dtype, int col_dist, int row_dist,
                                 int height, int width, int col_alignment,
                                 int row_alignment, void *buffer,
                                 int lda, elem_grid *grid_handle) {
   const Grid& grid = *(const Grid*)grid_handle;
-
   {{def body(ctx)}}
     {{if ctx.dist == 'MC,MR'}}
       {{ctx.matrix_t}} *matrix = new {{ctx.matrix_t}}(
@@ -159,9 +212,11 @@ elem_matrix *elem_create_matrix(int dtype, int col_dist, int row_dist,
     {{else}}
       {{py: assert False}}
     {{endif}}
-
-      {{ctx.wrapper_t}} *wrapper = 
-          new {{ctx.wrapper_t}}(dtype, col_dist, row_dist, matrix);
+      elem_matrix *wrapper = new elem_matrix();
+      wrapper->dtype = dtype;
+      wrapper->col_dist = col_dist;
+      wrapper->row_dist = row_dist;
+      wrapper->cpp_obj = matrix;
       return wrapper;
   {{enddef}}
 
@@ -170,11 +225,10 @@ elem_matrix *elem_create_matrix(int dtype, int col_dist, int row_dist,
 
 void elem_destroy_matrix(elem_matrix *matrix) {
   {{def body(ctx)}}
-    {{ctx.wrapper_t}} *wrapper = ({{ctx.wrapper_t}}*)matrix;
-    delete wrapper->wrapped;
-    delete wrapper;
+    delete ({{ctx.matrix_t}}*)matrix->cpp_obj;
+    delete matrix;
   {{enddef}}
-  {{dispatch(body, ALL_DISTRIBUTIONS, 'matrix', None)}}
+  {{dispatch(body, None, 'matrix', None)}}
 }
 
 int elem_gemm(int orientation_of_a,
@@ -195,3 +249,48 @@ int elem_gemm(int orientation_of_a,
   {{enddef}}
   {{dispatch(body, 'MC,MR', 'A B C')}}
 }
+
+int elem_print(elem_matrix *matrix) {
+  {{def body(ctx)}}
+  {{ctx.matrix('matrix')}}.Print();
+  {{enddef}}
+  {{dispatch(body, None, 'matrix')}}
+}
+
+int elem_set_to_identity(elem_matrix *matrix) {
+  {{def body(ctx)}}
+  {{ctx.matrix('matrix')}}.SetToIdentity();
+  {{enddef}}
+  {{dispatch(body, None, 'matrix')}}
+}
+
+
+/*
+  Grid
+*/
+
+elem_grid *elem_create_grid(MPI_Comm comm, int height, int width) {
+  try {
+    return (elem_grid*)(new Grid(comm, height, width));
+  } catch (std::exception &e) {
+    set_error(e.what());
+    return NULL;
+  } catch (...) {
+    set_error("non-std exception");
+    return NULL;
+  }
+}
+ 
+void elem_destroy_grid(elem_grid *grid) {
+  delete (Grid*)grid;
+}
+
+int elem_local_length(int n, int index, int alignment, int modulus) {
+  return LocalLength(n, index, alignment, modulus);
+}
+
+{{for property in 'MCRank MRRank Height Width'.split()}}
+int elem_grid_{{property.lower()}}(elem_grid *grid) {
+  return ((Grid*)grid)->{{property}}();
+}
+{{endfor}}

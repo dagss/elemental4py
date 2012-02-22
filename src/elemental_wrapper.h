@@ -3,16 +3,9 @@
 
 #include <mpi.h>
 
-#if __STDC_VERSION__ >= 199901L
-#include <complex.h>
-typedef double complex elem_complex;
-#else
 typedef struct {
   double real, imag;
 } elem_complex;
-#define creal(x) (x).real
-#define cimag(x) (x).imag
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +16,10 @@ extern "C" {
 #define ELEM_SINGLE_COMPLEX 1
 #define ELEM_DOUBLE_REAL 2
 #define ELEM_DOUBLE_COMPLEX 3
+
+#define ELEM_ERROR_OK 0
+#define ELEM_ERROR_LOGIC -1
+#define ELEM_ERROR_RUNTIME -2
 
 #define ELEM_MC 0
 #define ELEM_MD 1
@@ -45,9 +42,15 @@ typedef struct {
   int dtype;
   int col_dist;
   int row_dist;
+  void *cpp_obj;
 } elem_matrix;
 
-char *elem_last_error();
+/* global environment */
+char *elem_errmsg();
+int elem_initialize(int *argc, char **argv);
+void elem_finalize();
+
+/* matrix/matrix ops */
 
 elem_matrix *elem_create_matrix(int dtype, int col_dist, int row_dist,
                                 int height, int width, int col_alignment,
@@ -55,8 +58,6 @@ elem_matrix *elem_create_matrix(int dtype, int col_dist, int row_dist,
                                 int lda, elem_grid *grid);
 void elem_destroy_matrix(elem_matrix *matrix);
 
-void elem_create_grid(MPI_Comm comm, int height, int width);
-void elem_destroy_grid(elem_grid *grid);
 
 int elem_local_length(int n, int index, int alignment, int modulus);
 
@@ -68,6 +69,17 @@ int elem_gemm(int orientation_of_a,
               elem_complex beta,
               elem_matrix *C);
 
+int elem_print(elem_matrix *matrix);
+int elem_set_to_identity(elem_matrix *matrix);
+
+
+/* grid */
+elem_grid *elem_create_grid(MPI_Comm comm, int height, int width);
+void elem_destroy_grid(elem_grid *grid);
+int elem_grid_mcrank(elem_grid *grid);
+int elem_grid_mrrank(elem_grid *grid);
+int elem_grid_height(elem_grid *grid);
+int elem_grid_width(elem_grid *grid);
 
 #ifdef __cplusplus
 } /* extern "C" */
