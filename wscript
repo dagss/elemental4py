@@ -53,7 +53,7 @@ def configure(conf):
     conf.env.LIB_BLAS = ['goto2', 'gfortran']
 
 def build(bld):
-    bld(source=['elemental/elemental.pyx', 'src/polymorphic_elemental.cpp.in'],
+    bld(source=['elemental/elemental.pyx', 'src/elemental_wrapper.cpp.in'],
         includes=['src'],
         target='elemental',
         use='ELEMENTAL BLAS',

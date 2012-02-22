@@ -1,0 +1,197 @@
+/*
+Routines for doing run-time dispatching rather than compile-time
+template resolution of Elemental operations. This instantiates
+a large set of the available templates and makes them available
+through run-time mechanisms.
+*/
+
+{{py:
+ALL_DISTRIBUTIONS = [
+    ('MC', 'MR'),
+    ('MC', 'STAR')
+]
+
+DTYPES = {
+   'ELEM_SINGLE_REAL' : 'float',
+   'ELEM_SINGLE_COMPLEX' : 'Complex<float> ',
+   'ELEM_DOUBLE_REAL' : 'double',
+   'ELEM_DOUBLE_COMPLEX' : 'Complex<double> '
+}
+
+class Context:
+    def __init__(self, dtype_enum, dtype_t, coldist, rowdist):
+        self.dtype_enum = dtype_enum
+        self.dtype_t = dtype_t
+        self.coldist = coldist
+        self.rowdist = rowdist
+        self.dist = '%s,%s' % (coldist, rowdist)
+        self.matrix_t = 'DistMatrix<%s, %s, %s, int> ' % (dtype_t, coldist, rowdist)
+        self.wrapper_t = 'MatrixWrapper<%s> ' % dtype_t
+
+    def scalar(self, expr):
+        if self.dtype_t.startswith('Complex'):
+            return '(%s(creal(%s), cimag(%s)))' % (self.dtype_t, expr, expr)
+        else:
+            return '((%s)creal(%s))' % (self.dtype_t, expr)
+    
+    def matrix(self, wrapper_expr):
+        return '(*((%s*)((%s*)(%s))->wrapped))' % (self.matrix_t, self.wrapper_t, wrapper_expr)
+}}
+
+#include <string.h>
+
+#include "elemental_wrapper.h"
+#include "elemental.hpp"
+
+using namespace elem;
+
+template <typename T>
+class MatrixWrapper : public elem_matrix {
+public:
+  MatrixWrapper(int _dtype, int _col_dist, int _row_dist, AbstractDistMatrix<T> *matrix) {
+    dtype = _dtype;
+    col_dist = _col_dist;
+    row_dist = _row_dist;
+    wrapped = matrix;
+  }
+  AbstractDistMatrix<T> *wrapped;
+};
+
+
+static Orientation as_orientation(int x) {
+  switch (x) {
+    case ELEM_NORMAL:
+      return NORMAL;
+    case ELEM_TRANSPOSE:
+      return TRANSPOSE;
+    case ELEM_ADJOINT:
+      return ADJOINT;
+    default:
+      throw std::logic_error("invalid orientation code");
+  }
+}
+
+
+#define MAX_ERR_LEN 1024
+static char _errmsg[MAX_ERR_LEN];
+
+static void set_error(const char *msg) {
+  strncpy(_errmsg, msg, MAX_ERR_LEN);
+  _errmsg[MAX_ERR_LEN - 1] = '\0'; // in case of truncation
+}
+
+
+{{def generic_dispatch(body, distributions, dtype_expr, coldist_expr, rowdist_expr, errcode)}}
+{{py:
+if isinstance(distributions, str):
+    distributions = [tuple(x.split(',')) for x in distributions.split()]
+}}
+  try {
+    {{for dtype_enum, dtype_t in DTYPES.items()}}
+    if (({{dtype_expr}}) == {{dtype_enum}}) {
+      if (0) {}
+      {{for coldist, rowdist in distributions}}
+      else if (({{coldist_expr}}) == ELEM_{{coldist}} &&
+               ({{rowdist_expr}}) == ELEM_{{rowdist}}) {
+        {{py:
+ctx = Context(dtype_enum, dtype_t, coldist, rowdist)
+}}
+        {{body(ctx)}}
+      }
+      {{endfor}}
+      else {
+        throw std::logic_error("invalid colDist/rowDist combination");
+      }
+    }
+    {{endfor}}
+    throw std::logic_error("invalid dtype");
+  } catch (std::exception& e) {
+    {{if errcode is not None}}
+      set_error(e.what());
+      return {{errcode}};
+    {{endif}}
+  } catch (...) {
+    {{if errcode is not None}}
+      set_error("unrecognized exception");
+      return {{errcode}};
+    {{endif}}
+  }
+{{enddef}}
+
+{{def dispatch(body, distributions, matrix_exprs=['matrix'], errcode='-1')}}
+{{py:
+if isinstance(matrix_exprs, str):
+    matrix_exprs = matrix_exprs.split()
+}}
+  {{for matrix_expr in matrix_exprs[1:]}}
+  if ((({{matrix_expr}})->dtype != ({{matrix_exprs[0]}})->dtype) ||
+      (({{matrix_expr}})->col_dist != ({{matrix_exprs[0]}})->col_dist) ||
+      (({{matrix_expr}})->row_dist != ({{matrix_exprs[0]}})->row_dist)) {
+    {{if errcode is not None}}
+      set_error("dtype/col_dist/row_dist does not match up");
+      return {{errcode}};
+    {{else}}
+      return;
+    {{endif}}    
+  }
+  {{endfor}}
+  int _dtype = {{matrix_exprs[0]}}->dtype;
+  int _col_dist = {{matrix_exprs[0]}}->col_dist;
+  int _row_dist = {{matrix_exprs[0]}}->row_dist;
+  {{generic_dispatch(body, distributions, '_dtype', '_col_dist', '_row_dist', errcode)}}
+{{enddef}}
+
+elem_matrix *elem_create_matrix(int dtype, int col_dist, int row_dist,
+                                int height, int width, int col_alignment,
+                                int row_alignment, void *buffer,
+                                int lda, elem_grid *grid_handle) {
+  const Grid& grid = *(const Grid*)grid_handle;
+
+  {{def body(ctx)}}
+    {{if ctx.dist == 'MC,MR'}}
+      {{ctx.matrix_t}} *matrix = new {{ctx.matrix_t}}(
+            height, width, col_alignment, row_alignment,
+            ({{ctx.dtype_t}}*)buffer, lda, grid);
+    {{elif ctx.dist == 'MC,STAR'}}
+      {{ctx.matrix_t}} *matrix = new {{ctx.matrix_t}}(
+            height, width, col_alignment,
+            ({{ctx.dtype_t}}*)buffer, lda, grid);
+    {{else}}
+      {{py: assert False}}
+    {{endif}}
+
+      {{ctx.wrapper_t}} *wrapper = 
+          new {{ctx.wrapper_t}}(dtype, col_dist, row_dist, matrix);
+      return wrapper;
+  {{enddef}}
+
+  {{generic_dispatch(body, ALL_DISTRIBUTIONS, 'dtype', 'col_dist', 'row_dist', 'NULL')}}
+}
+
+void elem_destroy_matrix(elem_matrix *matrix) {
+  {{def body(ctx)}}
+    {{ctx.wrapper_t}} *wrapper = ({{ctx.wrapper_t}}*)matrix;
+    delete wrapper->wrapped;
+    delete wrapper;
+  {{enddef}}
+  {{dispatch(body, ALL_DISTRIBUTIONS, 'matrix', None)}}
+}
+
+int elem_gemm(int orientation_of_a,
+              int orientation_of_b,
+              elem_complex alpha,
+              elem_matrix *A,
+              elem_matrix *B,
+              elem_complex beta,
+              elem_matrix *C) {
+  {{def body(ctx)}}
+    Gemm(as_orientation(orientation_of_a),
+         as_orientation(orientation_of_b),
+         {{ctx.scalar('alpha')}},
+         {{ctx.matrix('A')}},
+         {{ctx.matrix('B')}},
+         {{ctx.scalar('beta')}},
+         {{ctx.matrix('C')}});
+  {{enddef}}
+  {{dispatch(body, 'MC,MR', 'A B C')}}
+}
