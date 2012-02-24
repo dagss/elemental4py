@@ -151,6 +151,16 @@ static Orientation as_orientation(int x) {
   }
 }
 
+static UpperOrLower as_uplo(int x) {
+  switch (x) {
+  case ELEM_LOWER:
+    return LOWER;
+  case ELEM_UPPER:
+    return UPPER;
+  default:
+    throw std::logic_error("invalid upper/lower code");
+  }
+}
 
 #define MAX_ERR_LEN 1024
 static char _errmsg[MAX_ERR_LEN];
@@ -248,6 +258,13 @@ int elem_gemm(int orientation_of_a,
          {{ctx.matrix('C')}});
   {{enddef}}
   {{dispatch(body, 'MC,MR', 'A B C')}}
+}
+
+int elem_cholesky(int uplo, elem_matrix *A) {
+  {{def body(ctx)}}
+    Cholesky(as_uplo(uplo), {{ctx.matrix('A')}});
+  {{enddef}}
+  {{dispatch(body, 'MC,MR', 'A')}}
 }
 
 int elem_print(elem_matrix *matrix) {

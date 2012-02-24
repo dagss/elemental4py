@@ -23,6 +23,9 @@ cdef extern from "elemental_wrapper.h":
         ELEM_ERROR_LOGIC
         ELEM_ERROR_RUNTIME
 
+        ELEM_UPPER
+        ELEM_LOWER
+
     ctypedef struct elem_complex:
         double real, imag
 
@@ -56,6 +59,8 @@ cdef extern from "elemental_wrapper.h":
                   elem_matrix *B,
                   elem_complex beta,
                   elem_matrix *C)
+
+    int elem_cholesky(int uplo, elem_matrix *A)
 
     int elem_print(elem_matrix *matrix)
     int elem_set_to_identity(elem_matrix *matrix)

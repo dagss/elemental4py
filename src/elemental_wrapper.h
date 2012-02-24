@@ -32,6 +32,9 @@ extern "C" {
 #define ELEM_TRANSPOSE 1
 #define ELEM_ADJOINT 2
 
+#define ELEM_LOWER 0
+#define ELEM_UPPER 1
+
 typedef struct {
 } elem_grid;
 
@@ -45,10 +48,11 @@ typedef struct {
   void *cpp_obj;
 } elem_matrix;
 
-/* global environment */
+/* global environment, utilities */
 char *elem_errmsg();
 int elem_initialize(int *argc, char **argv);
 void elem_finalize();
+int elem_local_length(int n, int index, int alignment, int modulus);
 
 /* matrix/matrix ops */
 
@@ -58,8 +62,9 @@ elem_matrix *elem_create_matrix(int dtype, int col_dist, int row_dist,
                                 int lda, elem_grid *grid);
 void elem_destroy_matrix(elem_matrix *matrix);
 
+int elem_print(elem_matrix *matrix);
+int elem_set_to_identity(elem_matrix *matrix);
 
-int elem_local_length(int n, int index, int alignment, int modulus);
 
 int elem_gemm(int orientation_of_a,
               int orientation_of_b,
@@ -69,8 +74,8 @@ int elem_gemm(int orientation_of_a,
               elem_complex beta,
               elem_matrix *C);
 
-int elem_print(elem_matrix *matrix);
-int elem_set_to_identity(elem_matrix *matrix);
+int elem_cholesky(int uplo, elem_matrix *A);
+
 
 
 /* grid */
