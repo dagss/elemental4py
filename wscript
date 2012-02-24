@@ -66,8 +66,10 @@ from os.path import join as pjoin
 
 from waflib import TaskGen
 
-
 def run_tempita(task):
+    # add tools/private to sys.path in order to import bundled Tempita
+    import sys
+    sys.path.append(os.path.join('tools', 'bundled'))
     import tempita
     import re
     assert len(task.inputs) == len(task.outputs) == 1
