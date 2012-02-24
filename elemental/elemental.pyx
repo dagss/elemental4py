@@ -146,8 +146,9 @@ cdef void _finalize():
     elem_finalize()
 
 _initialize()
-cdef extern from "stdlib.h":
-    int atexit(void (*func)())
-atexit(&_finalize)
+cdef extern from "Python.h":
+    int Py_AtExit(void (*func)()) except -1
+
+Py_AtExit(&_finalize)
 
 
