@@ -37,34 +37,71 @@ def configure(conf):
     conf.check_python_version((2,5))
     conf.check_python_headers()
 
+    conf.check_mpi4py()
+
     conf.check_tool('numpy', tooldir='tools')
     conf.check_numpy_version(minver=(1,3))
     conf.check_tool('cython', tooldir='tools')
     conf.check_cython_version(minver=(0,11,1))
     conf.check_tool('inplace', tooldir='tools')
 
-    conf.env.INCLUDES_ELEMENTAL = [
-        os.path.join(conf.options.with_elemental, 'include')]
-    conf.env.LIBPATH_ELEMENTAL = [
-        os.path.join(conf.options.with_elemental, 'lib')]
-    conf.env.LIB_ELEMENTAL = ['elemental', 'plcg', 'lapack-addons']
+    conf.check_elemental()
+    
+    if conf.options.with_goto2:
+        conf.env.RPATH_BLAS = conf.options.with_goto2
+        conf.env.LIBPATH_BLAS = conf.options.with_goto2
+        conf.env.LIB_BLAS = ['goto2', 'gfortran']
 
-    conf.env.RPATH_BLAS = conf.options.with_goto2
-    conf.env.LIBPATH_BLAS = conf.options.with_goto2
-    conf.env.LIB_BLAS = ['goto2', 'gfortran']
+    conf.env.CYTHONFLAGS = '--fast-fail'
 
 def build(bld):
     bld(source=['elemental/elemental.pyx', 'src/elemental_wrapper.cpp.in'],
         includes=['src'],
         target='elemental',
-        use='ELEMENTAL BLAS',
+        use='ELEMENTAL BLAS MPI4PY NUMPY',
         features='pyext cxxshlib cxx')
 
 
 from waflib.Configure import conf
 from os.path import join as pjoin
-
 from waflib import TaskGen
+
+@conf
+def check_mpi4py(conf):
+    conf.start_msg("Checking mpi4py includes")
+    (mpi4py_include,) = conf.get_python_variables(
+            ['mpi4py.get_include()'], ['import mpi4py'])
+    conf.env.INCLUDES_MPI4PY = mpi4py_include
+    conf.end_msg('ok (%s)' % mpi4py_include)
+
+@conf
+def check_elemental(conf):
+    conf.start_msg("Checking for Elemental")
+    conf.env.LIB_ELEMENTAL = ['elemental', 'plcg', 'pmrrr']
+    if conf.options.with_elemental:
+        conf.env.INCLUDES_ELEMENTAL = [
+            os.path.join(conf.options.with_elemental, 'include')]
+        conf.env.LIBPATH_ELEMENTAL = [
+            os.path.join(conf.options.with_elemental, 'lib')]
+
+    cfrag = dedent('''\
+    #include "elemental.hpp"
+    using namespace elem;
+
+    int foo() {
+    }    
+    ''')
+    
+    conf.check_cxx(
+        fragment=cfrag,
+        features = 'cxx cxxshlib',
+        compile_filename='test.cpp',
+        use='ELEMENTAL')
+
+    conf.end_msg(conf.options.with_elemental if conf.options.with_elemental
+                 else '(default path)')
+
+
 
 def run_tempita(task):
     # add tools/private to sys.path in order to import bundled Tempita
