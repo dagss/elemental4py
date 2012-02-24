@@ -186,10 +186,10 @@ int elem_initialize(int* argc, char **argv) {
     return 0;
   } catch (std::exception &e) {
     set_error(e.what());
-    return NULL;
+    return ELEM_ERROR_RUNTIME;
   } catch (...) {
     set_error("non-std exception");
-    return NULL;
+    return ELEM_ERROR_RUNTIME;
   }
 }
 
