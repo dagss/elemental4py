@@ -10,11 +10,11 @@ import time
 time.sleep(1)
 
 grid = elemental.Grid(ctx, comm, 2, 2)
-A = elemental.DistMatrix(10, 10, grid)
+A = elemental.DistMatrix(grid, 10, 10)
 A.dump()
 #1/0
-B = elemental.DistMatrix(10, 10, grid)
-C = elemental.DistMatrix(10, 10, grid)
+B = elemental.DistMatrix(grid, 10, 10)
+C = elemental.DistMatrix(grid, 10, 10)
 
 #A.set_to_identity()
 B.set_to_identity()
