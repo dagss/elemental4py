@@ -120,11 +120,11 @@ _distribution_to_code = {
 
 cdef class DistMatrix:
     cdef elem_matrix *wrapped
-    cdef readonly object local_buf
+    cdef readonly object local
     cdef Context context
 
-    def __init__(self,
-                 height, width, Grid grid, dtype=np.double,
+    def __init__(self, Grid grid,
+                 height, width, dtype=np.double,
                  coldist='MC', rowdist='MR'):
         cdef:
             int local_height, local_width, col_alignment, row_alignment
@@ -137,10 +137,12 @@ cdef class DistMatrix:
         local_width = elem_local_length(width, grid.mrrank(),
                                         row_alignment, grid.width())
 
-        local_buf = np.zeros(local_height * local_width, dtype=dtype, order='F')
+        local_buf = np.zeros((local_height, local_width),
+                             dtype=dtype,
+                             order='F')
 
         self.context = grid.context
-        self.local_buf = local_buf
+        self.local = local_buf
 
         self.wrapped = elem_create_matrix(grid.wrapped,
                                           as_type_enum(dtype),
