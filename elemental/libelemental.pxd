@@ -19,12 +19,14 @@ cdef extern from "elemental_wrapper.h":
         ELEM_TRANSPOSE
         ELEM_ADJOINT
 
-        ELEM_ERROR_OK
         ELEM_ERROR_LOGIC
         ELEM_ERROR_RUNTIME
 
         ELEM_UPPER
         ELEM_LOWER
+
+    ctypedef struct elem_context:
+        pass
 
     ctypedef struct elem_complex:
         double real, imag
@@ -38,19 +40,20 @@ cdef extern from "elemental_wrapper.h":
         int row_dist
 
     # global
-    char *elem_errmsg()
-    int elem_initialize(int* argc, char **argv)
-    void elem_finalize()
+    elem_context *elem_create_context()
+    void elem_destroy_context(elem_context *ctx)
+    int elem_initialize(elem_context *ctx)
+    int elem_finalize(elem_context *ctx)
+    void elem_lasterror(elem_context *ctx, char **errmsg, int *errtype)
 
     # matrix/matrix ops
-    elem_matrix *elem_create_matrix(int dtype, int col_dist, int row_dist,
+    elem_matrix *elem_create_matrix(elem_grid *grid,
+                                    int dtype, int col_dist, int row_dist,
                                     int height, int width, int col_alignment,
                                     int row_alignment, void *buffer,
-                                    int lda, elem_grid *grid)
-    void elem_destroy_matrix(elem_matrix *matrix)
+                                    int lda)
+    int elem_destroy_matrix(elem_matrix *matrix)
 
-
-    int elem_local_length(int n, int index, int alignment, int modulus)
 
     int elem_gemm(int orientation_of_a,
                   int orientation_of_b,
@@ -66,10 +69,14 @@ cdef extern from "elemental_wrapper.h":
     int elem_set_to_identity(elem_matrix *matrix)
 
     # grid
-    elem_grid *elem_create_grid(MPI_Comm comm, int height, int width)
-    void elem_destroy_grid(elem_grid *grid)
+    elem_grid *elem_create_grid(elem_context *ctx, MPI_Comm comm,
+                                int height, int width)
+    int elem_destroy_grid(elem_grid *grid)
     int elem_grid_mcrank(elem_grid *grid)
     int elem_grid_mrrank(elem_grid *grid)
     int elem_grid_height(elem_grid *grid)
     int elem_grid_width(elem_grid *grid)
+    
+    # stateless non-error utils
+    int elem_local_length(int n, int index, int alignment, int modulus)
     
