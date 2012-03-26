@@ -29,6 +29,7 @@ cdef class Context:
 
     def __dealloc__(self):
         if self.wrapped != NULL:
+            check(self, elem_finalize(self.wrapped))
             elem_destroy_context(self.wrapped)
             self.wrapped = NULL
 

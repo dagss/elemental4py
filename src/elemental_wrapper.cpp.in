@@ -225,6 +225,7 @@ int elem_initialize(elem_context *ctx) {
 int elem_finalize(elem_context *ctx) {
   {{begin_catch}}
   Finalize();
+  return 0;
   {{end_catch_int('ctx')}}
 }
 
