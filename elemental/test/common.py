@@ -8,14 +8,23 @@ from ..mpiutils import *
 
 import functools
 
-def serialize_exc_info():
-    """
-    
-    """
+def format_exc_info():
     import traceback
     type_, value, tb = sys.exc_info()
     msg = traceback.format_exception(type_, value, tb)
     return ''.join(msg)
+
+def first_nonzero(arr):
+    """
+    Find index of first nonzero element in the 1D array `arr`, or raise
+    IndexError if no such element exists.
+    """
+    hits = np.nonzero(arr)
+    assert len(hits) == 1
+    if len(hits[0]) == 0:
+        raise IndexError("No non-zero elements")
+    else:
+        return hits[0][0]
 
 def mpi(nprocs):
     """
@@ -48,11 +57,11 @@ def mpi(nprocs):
                         func(sub_comm)
                     except AssertionError:
                         status = FAILED
-                        exc_msg = serialize_exc_info()
+                        exc_msg = format_exc_info()
                         raise
                     except:
                         status = ERROR
-                        exc_msg = serialize_exc_info()
+                        exc_msg = format_exc_info()
                         raise
             finally:
                 # Do communication of error results in a final block, so
@@ -60,11 +69,14 @@ def mpi(nprocs):
 
                 # First, figure out status of other nodes
                 statuses = MPI.COMM_WORLD.allgather(status)
-                first_non_success = np.nonzero(statuses)[0][0]
-
-                # First non-success gets to broadcast it's error
-                first_non_success_status, msg = MPI.COMM_WORLD.bcast(
-                    (status, exc_msg), root=first_non_success)
+                try:
+                    first_non_success = first_nonzero(statuses)
+                except IndexError:
+                    first_non_success_status = SUCCESS
+                else:
+                    # First non-success gets to broadcast it's error
+                    first_non_success_status, msg = MPI.COMM_WORLD.bcast(
+                        (status, exc_msg), root=first_non_success)
                     
                 # Exit finally-block -- erring/failing processes return here
 
