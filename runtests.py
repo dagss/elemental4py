@@ -49,4 +49,17 @@ class MpiOutput(Plugin):
 
 if __name__ == '__main__':
     import sys
+    import os
+
+    # This didn't work, mpich2 would tend to crash *shrug*
+    #if MPI.COMM_WORLD.Get_size() == 1:
+    #    # Launch using mpiexec
+    #    args = [sys.argv[0], '1']
+    #    print args
+    #    sys.stderr.write('Launched without mpiexec; '
+    #                     'calling with "mpiexec -np %d ..."\n' % WANTED_COMM_SIZE)
+    #    os.execlp('mpiexec', 'mpiexec', '-np', str(WANTED_COMM_SIZE),
+    #              sys.executable, *args)
+    #    # Does not return!
+
     nose.main(addplugins=[MpiOutput()], argv=sys.argv)
