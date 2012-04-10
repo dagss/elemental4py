@@ -9,135 +9,100 @@ through run-time mechanisms.
 Templating support code
 */
 
-{{py:
-ALL_DISTRIBUTIONS = [
+{% set all_distributions = [
     ('MC', 'MR'),
-    ('MC', 'STAR')
-]
+    ('MC', 'STAR')]
+%}
 
-DTYPES = {
+{% set all_dtypes = {
    'ELEM_SINGLE_REAL' : 'float',
    'ELEM_SINGLE_COMPLEX' : 'Complex<float> ',
    'ELEM_DOUBLE_REAL' : 'double',
    'ELEM_DOUBLE_COMPLEX' : 'Complex<double> '
-}
+  }
+%}
 
-class Specialization:
-    def __init__(self, dtype_enum, dtype_t, coldist, rowdist):
-        self.dtype_enum = dtype_enum
-        self.dtype_t = dtype_t
-        self.coldist = coldist
-        self.rowdist = rowdist
-        if coldist is not None:
-            assert rowdist is not None
-            self.dist = '%s,%s' % (coldist, rowdist)
-            self.matrix_t = 'DistMatrix<%s, %s, %s, int> ' % (dtype_t, coldist, rowdist)
-        else:
-            # coldist/rowdist is None, use AbstractDistMatrix
-            self.matrix_t = 'AbstractDistMatrix<%s, int> ' % dtype_t
+{% macro matrix_type(dtype, dist_str) -%}
+DistMatrix<{{ dtype }}, {{dist_str}}>{{ ' ' }}
+{%- endmacro %}
 
-    def scalar(self, expr):
-        if self.dtype_t.startswith('Complex'):
-            return '(%s((%s).real, (%s).imag))' % (self.dtype_t, expr, expr)
-        else:
-            return '((%s)(%s).real)' % (self.dtype_t, expr)
-    
-    def matrix(self, wrapper_expr):
-        return '(*((%s*)(%s)->cpp_obj))' % (self.matrix_t, wrapper_expr)
-}}
+{% macro matrix(dtype, dist, wrapper_ptr) -%}
+(*({{ matrix_type(dtype, dist) }}*)({{ wrapper_ptr }}->cpp_obj))
+{%- endmacro %}
 
-/* Templates for wrapping exception-catching logic. Needs a context, whose expression
-   should be passed as the argument.
- */
-{{def begin_catch}}
-try {
-{{enddef}}
-
-{{def end_catch(ctx_expr, errcode)}}
-} catch (std::logic_error &e) {
-  ((Context*)({{ctx_expr}}))->set_error(e, ELEM_ERROR_LOGIC);
-  return {{errcode}};
-} catch (std::exception &e) {
-  ((Context*)({{ctx_expr}}))->set_error(e, ELEM_ERROR_RUNTIME);
-  return {{errcode}};
-} catch (...) {
-  ((Context*)({{ctx_expr}}))->set_error("non-std::exception thrown", ELEM_ERROR_RUNTIME);
-  return {{errcode}};
-}
-{{enddef}}
-
-{{def end_catch_int(ctx_expr)}}
-{{end_catch(ctx_expr, '-1')}}
-{{enddef}}
-
-{{def end_catch_ptr(ctx_expr)}}
-{{end_catch(ctx_expr, 'NULL')}}
-{{enddef}}
+{% macro scalar(dtype, scalar_expr) -%}
+  {%- if dtype.startswith('Complex') -%}
+  ({{ dtype }}(({{ scalar_expr }}).real, ({{ scalar_expr }}).imag))
+  {%- else -%}
+  (({{ dtype }})({{ scalar_expr }}.real))
+  {%- endif -%}
+{%- endmacro %}
 
 
+{% macro catch(ctx, errcode='-1') -%}
+  try {
+    {{- caller() -}}
+  } catch (std::logic_error &e) {
+    ((Context*)({{ ctx }}))->set_error(e, ELEM_ERROR_LOGIC);
+    return {{ errcode }};
+  } catch (std::exception &e) {
+    ((Context*)({{ ctx }}))->set_error(e, ELEM_ERROR_RUNTIME);
+    return {{ errcode }};
+  } catch (...) {
+    ((Context*)({{ ctx }}))->set_error("non-std::exception thrown", ELEM_ERROR_RUNTIME);
+    return {{ errcode }};
+  }
+{%- endmacro %}
 
-{{def generic_dispatch(body, distributions, dtype_expr, coldist_expr, rowdist_expr)}}
-{{py:
-if isinstance(distributions, str):
-    distributions = [tuple(x.split(',')) for x in distributions.split()]
-}}
+{% macro dtype_dispatch(dtype_expr) %}
     if (0) {}
-
-    {{for dtype_enum, dtype_t in DTYPES.items()}}
-    else if (({{dtype_expr}}) == {{dtype_enum}}) {
-
-      {{if distributions is None}}
-      {{# use abstract superclass }}
-
-      {{py: spec = Specialization(dtype_enum, dtype_t, None, None)}}
-      {{body(spec)}}
-
-      {{else}}
-      {{# use a new if-test to statically dispatch on distribution }}
-
-      if (0) {}
-      {{for coldist, rowdist in distributions}}
-      else if (({{coldist_expr}}) == ELEM_{{coldist}} &&
-               ({{rowdist_expr}}) == ELEM_{{rowdist}}) {
-        {{py: spec = Specialization(dtype_enum, dtype_t, coldist, rowdist)}}
-        {{body(spec)}}
-      }
-      {{endfor}}
-      else {
-        throw std::logic_error("invalid colDist/rowDist combination");
-      }
-
-      {{endif}}
-
+    {% for dtype_enum, dtype_t in all_dtypes.items() -%}
+    else if (({{ dtype_expr }}) == {{ dtype_enum }}) {
+      {{- caller(dtype_t) -}}
     }
-    {{endfor}}
-    throw std::logic_error("invalid dtype");
-{{enddef}}
+    {%- endfor %}
+    else {
+      throw std::logic_error("invalid dtype (or forgot to return in wrapper code)");
+    }
+    throw std::logic_error("invalid dtype (or forgot to return in wrapper code)");
+{% endmacro %}
 
-{{def dispatch(body, distributions, matrix_exprs=['matrix'])}}
-{{py:
-if isinstance(matrix_exprs, str):
-    matrix_exprs = matrix_exprs.split()
-}}
-  {{for matrix_expr in matrix_exprs[1:]}}
-  if (({{matrix_expr}})->grid != ({{matrix_exprs[0]}})->grid) {
-    throw std::logic_error("not the same grid for all matrices");
+{% macro dist_dispatch(coldist_expr, rowdist_expr, distributions=all_distributions) %}
+    if (0) {}
+    {% for coldist, rowdist in utils.as_distribution_list(distributions) -%}
+    else if (({{ coldist_expr }}) == ELEM_{{ coldist }} &&
+             ({{ rowdist_expr }}) == ELEM_{{ rowdist }}) {
+        {{- caller('%s,%s' % (coldist, rowdist)) -}}
+      }
+    {%- endfor %}
+    else {
+      throw std::logic_error("invalid colDist/rowDist combination");
+    }
+{% endmacro %} 
+
+{% macro dispatch_all_same(matrices, distributions=all_distributions) %}
+  {% set matrices = matrices.split() %}
+  {% set outer_caller = caller %}
+  {% set matrix = None %}
+  {% if len(matrices) > 1 %}
+  /* Check that all matrices have same dtype and ordering*/
+  if (
+    {%- for matrix in matrices[1:] -%}
+    (({{ matrices[0] }})->dtype != ({{ matrix }})->dtype &&
+     ({{ matrices[0] }})->col_dist != ({{ matrix }})->col_dist &&
+     ({{ matrices[0] }})->row_dist != ({{ matrix }})->row_dist) {{'||' if not loop.last}}
+    {%- endfor -%}) {
+    throw std::logic_error("dtypes/col_dist/row_dist of matrices do not match up");
   }
-  {{endfor}}
-  {{for matrix_expr in matrix_exprs[1:]}}
-  if ((({{matrix_expr}})->dtype != ({{matrix_exprs[0]}})->dtype) ||
-      (({{matrix_expr}})->col_dist != ({{matrix_exprs[0]}})->col_dist) ||
-      (({{matrix_expr}})->row_dist != ({{matrix_exprs[0]}})->row_dist)) {
-      throw std::logic_error("dtype/col_dist/row_dist does not match up");
-  }
-  {{endfor}}
-  int _dtype = {{matrix_exprs[0]}}->dtype;
-  {{if distributions is not None}}
-  int _col_dist = {{matrix_exprs[0]}}->col_dist;
-  int _row_dist = {{matrix_exprs[0]}}->row_dist;
-  {{endif}}
-  {{generic_dispatch(body, distributions, '_dtype', '_col_dist', '_row_dist')}}
-{{enddef}}
+  {% endif %}
+  {% call(dtype) dtype_dispatch('(%s)->dtype' % matrices[0]) -%}
+  {%- call(dist) dist_dispatch('(%s)->col_dist' % matrices[0], '(%s)->row_dist' % matrices[0],
+                               distributions) -%}
+  {{- outer_caller(dtype, dist) -}}
+  {%- endcall -%}
+  {%- endcall -%}
+
+{% endmacro %}
 
 
 /*
@@ -200,6 +165,15 @@ static void set_error(const char *msg) {
 
 
 
+/*
+  Stateless non-failing utilities
+ */
+int elem_local_length(int n, int index, int alignment, int modulus) {
+  return LocalLength(n, index, alignment, modulus);
+}
+
+
+
 /* 
   Context/global state
 */
@@ -213,20 +187,20 @@ void elem_destroy_context(elem_context *ctx) {
 }
 
 int elem_initialize(elem_context *ctx) {
-  {{begin_catch}}
+  {% call catch('ctx') %}
   int argc = 0;
   char **argv = NULL;
   Initialize(argc, argv);
   return 0;
-  {{end_catch_int('ctx')}}
+  {% endcall %}
 }
 
 
 int elem_finalize(elem_context *ctx) {
-  {{begin_catch}}
+  {% call catch('ctx') %}
   Finalize();
   return 0;
-  {{end_catch_int('ctx')}}
+  {% endcall %}
 }
 
 void elem_lasterror(elem_context *ctx, char **errmsg, int *errtype) {
@@ -235,51 +209,85 @@ void elem_lasterror(elem_context *ctx, char **errmsg, int *errtype) {
 }
 
 /*
-  DistMatrix and matrix operations
+  Grid
 */
 
+
+elem_grid *elem_create_grid(elem_context *ctx, MPI_Comm comm, int height, int width) {
+  {% call catch('ctx', 'NULL') %}
+  elem_grid *grid = new elem_grid();
+  grid->cpp_obj = new Grid(comm, height, width);
+  grid->ctx = ctx;
+  return grid;
+  {% endcall %}
+}
+ 
+int elem_destroy_grid(elem_grid *grid) {
+  Context *ctx = (Context*)grid->ctx; /* copy out ctx-pointer before destruction */
+  {% call catch('ctx') %}
+  delete (Grid*)grid->cpp_obj;
+  delete grid;
+  {% endcall %}
+}
+
+{% for property in 'MCRank MRRank Height Width'.split() %}
+int elem_grid_{{property.lower()}}(elem_grid *grid) {
+  {% call catch('grid->ctx') %}
+  return ((Grid*)grid->cpp_obj)->{{property}}();
+  {% endcall %}  
+}
+{% endfor %}
+
+/*
+   DistMatrix
+*/
 elem_matrix *elem_create_matrix(elem_grid *grid,
                                 int dtype, int col_dist, int row_dist,
                                 int height, int width, int col_alignment,
                                 int row_alignment, void *buffer,
                                 int lda) {
-  {{begin_catch}}
-  const Grid& cpp_grid = *(const Grid*)grid->cpp_obj;
-  {{def body(spec)}}
-    {{if spec.dist == 'MC,MR'}}
-      {{spec.matrix_t}} *matrix = new {{spec.matrix_t}}(
-            height, width, col_alignment, row_alignment,
-            ({{spec.dtype_t}}*)buffer, lda, cpp_grid);
-    {{elif spec.dist == 'MC,STAR'}}
-      {{spec.matrix_t}} *matrix = new {{spec.matrix_t}}(
-            height, width, col_alignment,
-            ({{spec.dtype_t}}*)buffer, lda, cpp_grid);
-    {{else}}
-      {{py: assert False}}
-    {{endif}}
-      elem_matrix *wrapper = new elem_matrix();
-      wrapper->dtype = dtype;
-      wrapper->col_dist = col_dist;
-      wrapper->row_dist = row_dist;
-      wrapper->cpp_obj = matrix;
-      wrapper->grid = grid;
-      return wrapper;
-  {{enddef}}
+  {% call catch('grid->ctx', 'NULL') %}
+    const Grid& cpp_grid = *(const Grid*)grid->cpp_obj;
+    {% call(dtype) dtype_dispatch('dtype') %}
+      {% call(dist) dist_dispatch('col_dist', 'row_dist') %}
+        {% set matrix_t = matrix_type(dtype, dist) %}
+        {% if dist == 'MC,MR' %}
 
-  {{generic_dispatch(body, ALL_DISTRIBUTIONS, 'dtype', 'col_dist', 'row_dist')}}
-  {{end_catch_ptr('grid->ctx')}}
+          {{ matrix_t }} *matrix = new {{ matrix_t }}(
+                  height, width, col_alignment, row_alignment,
+                  ({{dtype}}*)buffer, lda, cpp_grid);
+
+        {% elif dist == 'MC,STAR' %}
+
+          {{ matrix_t }} *matrix = new {{ matrix_t }}(
+                  height, width, col_alignment,
+                  ({{dtype}}*)buffer, lda, cpp_grid);
+
+        {% else %}
+        {{please.fail}}
+        {% endif %}
+
+        elem_matrix *wrapper = new elem_matrix();
+        wrapper->dtype = dtype;
+        wrapper->col_dist = col_dist;
+        wrapper->row_dist = row_dist;
+        wrapper->cpp_obj = matrix;
+        wrapper->grid = grid;
+        return wrapper;
+      {% endcall %}
+    {% endcall %}
+  {% endcall %}
 }
 
 int elem_destroy_matrix(elem_matrix *matrix) {
   Context *ctx = (Context*)matrix->grid->ctx; /* copy out before destructing */
-  {{def body(spec)}}
-    delete ({{spec.matrix_t}}*)matrix->cpp_obj;
+  {% call catch('ctx') %}
+  {% call(dtype) dtype_dispatch('matrix->dtype') %}
+    delete (AbstractDistMatrix<{{ dtype }}>*)matrix->cpp_obj;
     delete matrix;
     return 0;
-  {{enddef}}
-  {{begin_catch}}
-  {{dispatch(body, None, 'matrix')}}
-  {{end_catch_int('ctx')}}
+  {% endcall %}
+  {% endcall %}
 }
 
 int elem_gemm(int orientation_of_a,
@@ -289,84 +297,46 @@ int elem_gemm(int orientation_of_a,
               elem_matrix *B,
               elem_complex beta,
               elem_matrix *C) {
-  {{def body(spec)}}
+  {% call catch('A->grid->ctx') %}
+  {% call(dtype, dist) dispatch_all_same('A B C', 'MC,MR') %}
     Gemm(as_orientation(orientation_of_a),
          as_orientation(orientation_of_b),
-         {{spec.scalar('alpha')}},
-         {{spec.matrix('A')}},
-         {{spec.matrix('B')}},
-         {{spec.scalar('beta')}},
-         {{spec.matrix('C')}});
+         {{scalar(dtype, 'alpha')}},
+         {{matrix(dtype, dist, 'A')}},
+         {{matrix(dtype, dist, 'B')}},
+         {{scalar(dtype, 'beta')}},
+         {{matrix(dtype, dist, 'C')}});
     return 0;
-  {{enddef}}
-  {{begin_catch}}
-  {{dispatch(body, 'MC,MR', 'A B C')}}
-  {{end_catch_int('A->grid->ctx')}}
+  {% endcall %}
+  {% endcall %}
 }
 
 int elem_cholesky(int uplo, elem_matrix *A) {
-  {{def body(spec)}}
-    Cholesky(as_uplo(uplo), {{spec.matrix('A')}});
+  {% call catch('A->grid->ctx') %}
+  {% call(dtype, dist) dispatch_all_same('A', 'MC,MR') %}
+    Cholesky(as_uplo(uplo),
+             {{matrix(dtype, dist, 'A')}});
     return 0;
-  {{enddef}}
-  {{begin_catch}}
-  {{dispatch(body, 'MC,MR', 'A')}}
-  {{end_catch_int('A->grid->ctx')}}
+  {% endcall %}
+  {% endcall %}
 }
 
-int elem_print(elem_matrix *matrix) {
-  {{def body(spec)}}
-    {{spec.matrix('matrix')}}.Print();
+int elem_print(elem_matrix *A) {
+  {% call catch('A->grid->ctx') %}
+  {% call(dtype, dist) dispatch_all_same('A', 'MC,MR') %}
+    {{matrix(dtype, dist, 'A')}}.Print();
     return 0;
-  {{enddef}}
-  {{begin_catch}}
-  {{dispatch(body, None, 'matrix')}}
-  {{end_catch_int('matrix->grid->ctx')}}
+  {% endcall %}
+  {% endcall %}
 }
 
-int elem_set_to_identity(elem_matrix *matrix) {
-  {{def body(spec)}}
-    {{spec.matrix('matrix')}}.SetToIdentity();
+int elem_set_to_identity(elem_matrix *A) {
+  {% call catch('A->grid->ctx') %}
+  {% call(dtype, dist) dispatch_all_same('A', 'MC,MR') %}
+    {{matrix(dtype, dist, 'A')}}.SetToIdentity();
     return 0;
-  {{enddef}}
-  {{begin_catch}}
-  {{dispatch(body, None, 'matrix')}}
-  {{end_catch_int('matrix->grid->ctx')}}
+  {% endcall %}
+  {% endcall %}
 }
 
-
-/*
-  Grid
-*/
-
-elem_grid *elem_create_grid(elem_context *ctx, MPI_Comm comm, int height, int width) {
-  {{begin_catch}}
-  elem_grid *grid = new elem_grid();
-  grid->cpp_obj = new Grid(comm, height, width);
-  grid->ctx = ctx;
-  return grid;
-  {{end_catch_ptr('ctx')}}
-}
- 
-int elem_destroy_grid(elem_grid *grid) {
-  {{begin_catch}}
-  delete (Grid*)grid->cpp_obj;
-  delete grid;
-  {{end_catch_int('grid->ctx')}}
-}
-
-{{for property in 'MCRank MRRank Height Width'.split()}}
-int elem_grid_{{property.lower()}}(elem_grid *grid) {
-  {{begin_catch}}
-  return ((Grid*)grid->cpp_obj)->{{property}}();
-  {{end_catch_int('grid->ctx')}}
-}
-{{endfor}}
-
-/*
-  Stateless non-failing utilities
- */
-int elem_local_length(int n, int index, int alignment, int modulus) {
-  return LocalLength(n, index, alignment, modulus);
-}
 

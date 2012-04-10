@@ -46,7 +46,8 @@ def mpi(nprocs):
             n = MPI.COMM_WORLD.Get_size()
             rank = MPI.COMM_WORLD.Get_rank()
             if n < nprocs:
-                raise RuntimeError('Number of available MPI processes too small')
+                raise RuntimeError('Number of available MPI processes (%d) '
+                                   'too small' % n)
             sub_comm = MPI.COMM_WORLD.Split(0 if rank < nprocs else 1, 0)
             SUCCESS, ERROR, FAILED = range(3)
             status = SUCCESS
