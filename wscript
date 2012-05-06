@@ -110,9 +110,7 @@ def run_jinja(task):
     assert len(task.inputs) == len(task.outputs) == 1
 
     # Load utils for use in template
-    sys.path.append('src')
     import template_utils
-    del sys.path[-1]
 
     template = Template(task.inputs[0].read())
     result = template.render(utils=template_utils, len=len)
