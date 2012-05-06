@@ -61,6 +61,12 @@ def build(bld):
         use='ELEMENTAL BLAS MPI4PY NUMPY',
         features='pyext cxxshlib cxx')
 
+    bld(source=['src/test.c', 'src/elemental_wrapper.cpp.in'],
+        includes=['src'],
+        target='test',
+        use='ELEMENTAL BLAS MPI4PY',
+        features='cprogram cxx')
+
 
 from waflib.Configure import conf
 from os.path import join as pjoin

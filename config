@@ -1,6 +1,7 @@
+export CC=mpicc
 export CXX=mpic++
 export CXXFLAGS='-O0 -g'
 #export CYTHONFLAGS="--fast-fail -I$HOME/code/mpi4py-1.3/src/include"
-#export INCLUDES="/usr/include/mpi"
+export INCLUDES="/usr/include/mpi"
 ./waf configure --inplace --with-elemental=$HOME/.local --with-goto2=$HOME/code/GotoBLAS2
 
